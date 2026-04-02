@@ -24,7 +24,15 @@ const app = express();
 app.set('view engine', 'pug');
 app.set('views', path.join(__dirname, 'views'));
 
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public'), {
+    etag: false,
+    maxAge: 0,
+    setHeaders: function(res, path) {
+        if (path.endsWith('.js') || path.endsWith('.css')) {
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        }
+    }
+}));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
