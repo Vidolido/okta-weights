@@ -1,0 +1,91 @@
+doctype html
+html(lang="en")
+  head
+    meta(charset="utf-8")
+    meta(name="viewport" content="width=device-width, initial-scale=1.0")
+    title= title
+    link(rel="stylesheet" href="/css/style.css")
+  body
+
+    // ═══ Top Navigation Bar ═══
+    nav.navbar
+      .navbar-inner
+
+        // Tab buttons
+        .navbar-tabs
+          button.tab-btn.active(data-tab="load" onclick="switchTab('load')") Loading
+          button.tab-btn(data-tab="unload" onclick="switchTab('unload')") Unloading
+
+        // Search + Date filter
+        .navbar-center
+          .search-box
+            input#searchInput(type="text" placeholder="Search driver, plate, weight..." oninput="onSearch()")
+
+          .date-filter
+            input#startDate.date-input(type="date")
+            span.date-separator to
+            input#endDate.date-input(type="date")
+            button.btn.btn-apply(onclick="applyDateFilter()") Apply
+
+        // Right actions
+        .navbar-right
+          button.btn.btn-columns(onclick="toggleColumnPopup()")
+            span.gear-icon ⚙
+
+    // ═══ Refresh Status Bar ═══
+    .refresh-bar
+      span#syncStatusText Loading sync status...
+
+    // ═══ Main Content ═══
+    main.main-content
+
+      // Loading tab
+      .tab-content#tabContent-load
+        .table-container
+          .pagination-bar.top-pagination#pagination-top-load
+          .table-scroll
+            table.data-table#table-load
+              thead#thead-load
+              tbody#tbody-load
+                tr
+                  td.empty-row(colspan="99") Loading data...
+          .pagination-bar.bottom-pagination#pagination-bottom-load
+
+      // Unloading tab
+      .tab-content#tabContent-unload(style="display:none")
+        .table-container
+          .pagination-bar.top-pagination#pagination-top-unload
+          .table-scroll
+            table.data-table#table-unload
+              thead#thead-unload
+              tbody#tbody-unload
+                tr
+                  td.empty-row(colspan="99") Loading data...
+          .pagination-bar.bottom-pagination#pagination-bottom-unload
+
+    // ═══ Column Visibility Modal ═══
+    .modal-overlay#columnModal(onclick="closeColumnPopup(event)")
+      .modal-card(onclick="event.stopPropagation()")
+        .modal-header
+          h3 Show / Hide Columns
+          button.modal-close(onclick="toggleColumnPopup()") ×
+        .modal-body#columnCheckboxes
+          // Dynamically populated
+        .modal-footer
+          button.btn.btn-cancel(onclick="toggleColumnPopup()") Cancel
+          button.btn.btn-ok(onclick="saveColumnVisibility(); toggleColumnPopup()") OK
+
+    // ═══ Export Dropdown (hidden, accessible via keyboard shortcut) ═══
+    .dropdown(style="display:none")
+      button.btn.btn-export(onclick="toggleExportDropdown()") Export ▾
+      .dropdown-menu#exportDropdown
+        a(href="#" onclick="exportData('csv'); return false") Export CSV
+        a(href="#" onclick="exportData('excel'); return false") Export Excel
+
+    // ═══ Config for client JS ═══
+    script.
+      window.__config = {
+        defaultRowsPerPage: #{defaultRowsPerPage},
+        defaultDateRangeDays: #{defaultDateRangeDays}
+      };
+    script(src="/js/app.js")

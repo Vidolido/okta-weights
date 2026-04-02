@@ -1,0 +1,20 @@
+{
+  "name": "okta-d-project",
+  "version": "1.0.0",
+  "description": "",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "exceljs": "^4.4.0",
+    "express": "^5.2.1",
+    "json2csv": "^6.0.0-alpha.2",
+    "mssql": "^12.2.1",
+    "pug": "^3.0.4"
+  }
+}
