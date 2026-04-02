@@ -92,7 +92,7 @@ async function tryLoadFromExcel() {
             console.log('[DataLoader] Loading pre-parsed JSON...');
             var raw = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
             if (raw.length > 0) {
-                kpiStore = raw.map(normalizeRow);
+                kpiStore = raw;
                 finishLoad(kpiStore);
                 return true;
             }
@@ -201,6 +201,9 @@ function normalizeRow(row) {
         net = row['Unloaded Qty [kg]'];
     }
 
+    // Parse Materials & Quantities into separate derivate name + qty
+    var parsed = parseMaterials(row['Materials & Quantities']);
+
     return {
         driver: row['Driver'],
         licensePlate: row['License Plate'],
@@ -208,7 +211,8 @@ function normalizeRow(row) {
         workOrderType: type,
         sessionCreationTime: toIso(row['Session Creation Time']),
         sessionClosingTime: toIso(row['Session Closing Time']),
-        derivate: row['Derivate'] || row['Materials & Quantities'],
+        derivate: parsed.derivate,
+        derivateQty: parsed.qty,
         smsNotificationTime: toIso(row['SMS Notification Time']),
         firstWeighingTime: toIso(firstTime),
         firstWeighingKg: firstKg,
@@ -217,6 +221,59 @@ function normalizeRow(row) {
         netQuantityKg: net,
         barrierEntranceTime: toIso(row['Barrier Entrance (U)']),
         barrierExitTime: toIso(row['Barrier Exit (U)']),
+    };
+}
+
+/**
+ * Parse "Materials & Quantities" string into {derivate, qty}.
+ * Examples:
+ *   "ULSD 33000"              -> {derivate: "ULSD", qty: 33000}
+ *   "JET FUEL 19700"         -> {derivate: "JET FUEL", qty: 19700}
+ *   "JET FUEL 34800 KONTROLNO" -> {derivate: "JET FUEL", qty: 34800}
+ *   "ULSD 29575; UNL 95 12000" -> {derivate: "ULSD; UNL 95", qty: "29575; 12000"}
+ *   null                      -> {derivate: null, qty: null}
+ */
+function parseMaterials(raw) {
+    if (!raw) return { derivate: null, qty: null };
+
+    var str = String(raw).trim();
+    if (!str) return { derivate: null, qty: null };
+
+    // Split by semicolon for multiple materials
+    var parts = str.split(';').map(function(s) { return s.trim(); }).filter(Boolean);
+
+    var names = [];
+    var qtys = [];
+
+    for (var i = 0; i < parts.length; i++) {
+        var part = parts[i];
+
+        // Find the LAST large number (3+ digits) — that's the quantity
+        // Everything before it is the material name
+        // e.g. "UNL 95 33100"           -> name="UNL 95",   qty=33100
+        // e.g. "JET FUEL 19700 KONTROLNO" -> name="JET FUEL", qty=19700
+        // e.g. "ULSD 29575"              -> name="ULSD",     qty=29575
+        var lastNumMatch = part.match(/^(.*?)\s+(\d{3,})(?:\s.*)?$/);
+        if (!lastNumMatch) {
+            // Maybe no space before number: try any number
+            lastNumMatch = part.match(/^(.*?)\b(\d{3,})\b/);
+        }
+        if (lastNumMatch) {
+            var name = lastNumMatch[1].trim();
+            var num = lastNumMatch[2];
+            // var extra = match[3]; // discarded (KONTROLNO, messages, etc.)
+            names.push(name);
+            qtys.push(num);
+        } else {
+            // No number found — just a name
+            names.push(part);
+            qtys.push(null);
+        }
+    }
+
+    return {
+        derivate: names.length > 0 ? names.join('; ') : null,
+        qty: qtys.length > 0 ? qtys.join('; ') : null,
     };
 }
 
@@ -288,4 +345,4 @@ function getKpiData(params) {
 
 function getStatus() { return Object.assign({}, storeStatus); }
 
-module.exports = { initialize: initialize, getKpiData: getKpiData, getStatus: getStatus };
+module.exports = { initialize: initialize, getKpiData: getKpiData, getStatus: getStatus, normalizeRow: normalizeRow };
