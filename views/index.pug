@@ -29,12 +29,16 @@ html(lang="en")
 
         // Right actions
         .navbar-right
-          button.btn.btn-columns(onclick="toggleColumnPopup()")
-            span.gear-icon ⚙
+          button.btn.btn-columns(onclick="toggleColumnPopup()") Columns
+          .dropdown
+            button.btn.btn-export(onclick="toggleExportDropdown()") Export &#9662;
+            .dropdown-menu#exportDropdown
+              a(href="#" onclick="exportData('csv'); return false") Export CSV
+              a(href="#" onclick="exportData('excel'); return false") Export Excel
 
-    // ═══ Refresh Status Bar ═══
-    .refresh-bar
-      span#syncStatusText Loading sync status...
+    // ═══ Status Bar (errors only) ═══
+    .refresh-bar(style="display:none")
+      span#syncStatusText
 
     // ═══ Main Content ═══
     main.main-content
@@ -74,13 +78,6 @@ html(lang="en")
         .modal-footer
           button.btn.btn-cancel(onclick="toggleColumnPopup()") Cancel
           button.btn.btn-ok(onclick="saveColumnVisibility(); toggleColumnPopup()") OK
-
-    // ═══ Export Dropdown (hidden, accessible via keyboard shortcut) ═══
-    .dropdown(style="display:none")
-      button.btn.btn-export(onclick="toggleExportDropdown()") Export ▾
-      .dropdown-menu#exportDropdown
-        a(href="#" onclick="exportData('csv'); return false") Export CSV
-        a(href="#" onclick="exportData('excel'); return false") Export Excel
 
     // ═══ Config for client JS ═══
     script.

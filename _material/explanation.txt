@@ -1,0 +1,47 @@
+*** DEVELOPER INSTRUCTIONS ***
+Project goal: to display data from the api on a locally hosted web page, that will be visible on the local network via ip address and port. 
+
+Step 1: take data from the api
+SETP TWO WILL BE SKIPED FOR NOW // Step 2: save the data in a table in a local database (localhost\sqlexpress)
+Step 3: display data from the local database on the website
+
+Data to pull from the API, from RawEvents, in the same way like in the following columns in sheet KPI:
+
+ C - License plate (for both load and unload)
+ G - Session creation time (for both load and unload)
+ M - Session closing time (for both load and unload)
+ P - Materials & quantities (i need only the text part from this column, without the numbers and without the word KONTROLNO, and i need this column to be named "Derivate") (for both load and unload)
+ R - SMS Notification Time (for both load and unload)
+ U - 1st Weighing Time (L) (for load)
+ V - 1st Weighing [kg] (L) (for load)
+ Y - 2nd Weighing Time (L) (for load)
+ Z - 2nd Weighing [kg] (L) (for load)
+AA - Loaded Qty [kg] (for load)
+AB - 1st Weighing Time (U) (for unload)
+AC - 1st Weighing [kg] (U) (for unload)
+AD - Barrier Entrance (U) (for unload)
+AE - Barrier Exit (U) (for unload)
+AF - 2nd Weighing Time (U) (for unload)
+AG - 2nd Weighing [kg] (U) (for unload)
+AH - Unloaded Qty [kg] (for unload)
+
+Website header: 
+      - left side of header -  calendar-like date selector where the user can select beginning and end date for filtering according to the date.
+
+      - right side of header - select weather to preview load or unload - (from column D in KPI sheet) - only one can be displayed at a time.
+
+      - header middle -  a button that opens a pop-up box where all columns are listed alongside a tick-box, where the user can turn on or off the preview for that specific column, and an ok and cancel button.
+
+Website content: 
+A table like preview of the data.
+Pagination at the bottom. (50 rows per page)
+
+No footer.
+
+Database info: MSSQL, already created. Database name: localhost\sqlexpress, a table needs to be created in the database to store the data.
+
+Website info: will be hosted on IIS, no ssl, accessible through the server's ip addres and port 6969
+
+Server info: windows server 2019
+
+Api info: there is a VBA macro inside the excel that has all the information about the api. Examine the excel file and use all information needed.
