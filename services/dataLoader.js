@@ -2,20 +2,16 @@
  * Data Loader
  * Orchestrates data loading on startup:
  *   1. Try the API → process events into KPI records → serve
- *   2. If API fails → try loading from Excel RawEvents sheet → process into KPI records
- *   3. If Excel also fails → serve from the database
+ *   2. If API fails → try loading from Excel KPI sheet
+ *   3. If Excel also fails → try loading from database
  *
- * KPI records are kept in memory and served via /api/data/kpi
+ * All sources are normalized to frontend column names.
  */
 
 const path = require('path');
 const fs = require('fs');
 const ExcelJS = require('exceljs');
 
-const apiClient = require('./apiClient');
-const kpiProcessor = require('./kpiProcessor');
-
-// In-memory KPI store
 let kpiStore = [];
 let storeStatus = {
     loaded: false,
@@ -27,249 +23,137 @@ let storeStatus = {
     lastLoadTime: null,
 };
 
-/**
- * Initialize data loading on server startup.
- * Tries API first, then falls back to Excel.
- */
 async function initialize() {
     console.log('[DataLoader] Starting data initialization...');
-
-    // Try API first
-    const apiSuccess = await tryLoadFromApi();
-    if (apiSuccess) {
-        return;
-    }
-
-    // Try Excel fallback
-    const excelSuccess = await tryLoadFromExcel();
-    if (excelSuccess) {
-        return;
-    }
-
-    // Try database
-    const dbSuccess = await tryLoadFromDatabase();
-    if (dbSuccess) {
-        return;
-    }
-
-    storeStatus.error = 'All data sources failed. Check server logs for details.';
+    if (await tryLoadFromApi()) return;
+    if (await tryLoadFromExcel()) return;
+    if (await tryLoadFromDatabase()) return;
+    storeStatus.error = 'All data sources failed.';
     console.error('[DataLoader] All data sources failed.');
 }
 
-/**
- * Try loading data from the OKTA API.
- */
+// ── API Loader ─────────────────────────────────────────────────────
+
 async function tryLoadFromApi() {
     console.log('[DataLoader] Attempting API connection...');
     storeStatus.source = 'api';
-
     try {
-        // Authenticate
+        var apiClient = require('./apiClient');
+        var kpiProcessor = require('./kpiProcessor');
         await apiClient.authenticate();
 
-        // Fetch sessions (last 30 days)
-        const modFrom = new Date();
+        var modFrom = new Date();
         modFrom.setDate(modFrom.getDate() - 30);
-        const modFromStr = modFrom.toISOString().split('T')[0] + 'T00:00:00';
-
-        const sessions = await apiClient.getSessions(modFromStr);
+        var sessions = await apiClient.getSessions(modFrom.toISOString().split('T')[0] + 'T00:00:00');
         console.log('[DataLoader] API returned', sessions.length, 'sessions');
 
-        // Process each session
-        const records = [];
-
-        for (const session of sessions) {
+        var records = [];
+        for (var i = 0; i < sessions.length; i++) {
             try {
-                // Fetch events for this session
-                const events = await apiClient.getSessionEvents(session.auraId);
-
-                // Process into KPI
-                const kpi = kpiProcessor.processSession(session, events);
-                if (kpi) {
-                    records.push(kpi);
-                }
-
-                // Small delay to not hammer the API
-                await new Promise(function (resolve) { setTimeout(resolve, 300); });
-
-            } catch (err) {
-                console.warn('[DataLoader] Failed to process session', session.auraId, ':', err.message);
+                var events = await apiClient.getSessionEvents(sessions[i].auraId);
+                var kpi = kpiProcessor.processSession(sessions[i], events);
+                if (kpi) records.push(kpi);
+                await new Promise(function (r) { setTimeout(r, 300); });
+            } catch (e) {
+                console.warn('[DataLoader] Session', sessions[i].auraId, 'failed:', e.message);
             }
         }
 
         if (records.length > 0) {
             kpiStore = records;
-            storeStatus.loaded = true;
-            storeStatus.error = null;
-            storeStatus.recordCount = records.length;
-            storeStatus.loadCount = records.filter(function (r) { return r.workOrderType === 'load'; }).length;
-            storeStatus.unloadCount = records.filter(function (r) { return r.workOrderType === 'unload'; }).length;
-            storeStatus.lastLoadTime = new Date().toISOString();
-            console.log('[DataLoader] API load successful:', storeStatus.recordCount, 'records (' + storeStatus.loadCount + ' load, ' + storeStatus.unloadCount + ' unload)');
+            finishLoad(records);
             return true;
         }
-
         storeStatus.error = 'API returned 0 processable sessions.';
         return false;
-
-    } catch (err) {
-        const msg = 'API connection failed: ' + err.message;
-        console.error('[DataLoader]', msg);
-        storeStatus.error = msg;
+    } catch (e) {
+        console.error('[DataLoader] API failed:', e.message);
+        storeStatus.error = 'API connection failed: ' + e.message;
         return false;
     }
 }
 
-/**
- * Try loading data from the Excel file in _material/
- * Reads the RawEvents sheet and processes each session's events into KPI records.
- */
+// ── Excel Loader ────────────────────────────────────────────────────
+
 async function tryLoadFromExcel() {
     console.log('[DataLoader] Attempting Excel fallback...');
     storeStatus.source = 'excel';
 
-    const excelPath = path.resolve(__dirname, '..', '_material', 'Okta_EventDump_ProofOfConce222222pt.xlsm');
-
+    var excelPath = path.resolve(__dirname, '..', '_material', 'Okta_EventDump_ProofOfConce222222pt.xlsm');
     if (!fs.existsSync(excelPath)) {
-        const msg = 'Excel file not found: ' + excelPath;
-        console.error('[DataLoader]', msg);
-        storeStatus.error = msg;
+        storeStatus.error = 'Excel file not found.';
         return false;
     }
 
     try {
-        // Fast load: use pre-parsed JSON file
-        const jsonPath = path.resolve(__dirname, '..', '_material', 'kpi_data.json');
-
+        // Fast path: pre-parsed JSON
+        var jsonPath = path.resolve(__dirname, '..', '_material', 'kpi_data.json');
         if (fs.existsSync(jsonPath)) {
             console.log('[DataLoader] Loading pre-parsed JSON...');
-            const raw = fs.readFileSync(jsonPath, 'utf8');
-            const records = JSON.parse(raw);
-
-            if (records.length > 0) {
-                kpiStore = records;
-                storeStatus.loaded = true;
-                storeStatus.error = null;
-                storeStatus.recordCount = records.length;
-                storeStatus.loadCount = records.filter(function (r) { return r.workOrderType === 'load'; }).length;
-                storeStatus.unloadCount = records.filter(function (r) { return r.workOrderType === 'unload'; }).length;
-                storeStatus.lastLoadTime = new Date().toISOString();
-                console.log('[DataLoader] JSON load successful:', storeStatus.recordCount, 'records (' + storeStatus.loadCount + ' load, ' + storeStatus.unloadCount + ' unload)');
+            var raw = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+            if (raw.length > 0) {
+                kpiStore = raw.map(normalizeRow);
+                finishLoad(kpiStore);
                 return true;
             }
         }
 
-        // Fallback: parse Excel directly (slow, ~30s for 20K rows)
-        console.log('[DataLoader] JSON not found, parsing Excel directly (this may take a while)...');
-        const workbook = new ExcelJS.Workbook();
-        await workbook.xlsx.readFile(excelPath);
+        // Slow path: parse Excel KPI sheet
+        console.log('[DataLoader] Parsing Excel KPI sheet...');
+        var wb = new ExcelJS.Workbook();
+        await wb.xlsx.readFile(excelPath);
+        var sheet = wb.getWorksheet('KPI');
+        if (!sheet) { storeStatus.error = 'KPI sheet not found.'; return false; }
 
-        const rawSheet = workbook.getWorksheet('RawEvents');
-        if (!rawSheet) {
-            storeStatus.error = 'RawEvents sheet not found in Excel file.';
-            return false;
-        }
-
-        console.log('[DataLoader] Excel RawEvents sheet:', rawSheet.rowCount, 'rows');
-
-        // Parse headers
-        const headers = [];
-        const headerRow = rawSheet.getRow(1);
-        for (let c = 1; c <= rawSheet.columnCount; c++) {
-            let v = headerRow.getCell(c).value;
-            if (v && typeof v === 'object' && v.richText) v = v.richText.map(function (r) { return r.text; }).join('');
+        var headers = [];
+        var hr = sheet.getRow(1);
+        for (var c = 1; c <= sheet.columnCount; c++) {
+            var v = hr.getCell(c).value;
+            if (v && typeof v === 'object' && v.richText) v = v.richText.map(function(x) { return x.text; }).join('');
             headers.push(v);
         }
 
-        // Group events by session
-        const sessionMap = {};
-
-        for (let r = 2; r <= rawSheet.rowCount; r++) {
-            const row = rawSheet.getRow(r);
-            const record = {};
-            for (let c = 1; c <= rawSheet.columnCount; c++) {
-                let v = row.getCell(c).value;
-                if (v && typeof v === 'object' && v.richText) v = v.richText.map(function (rt) { return rt.text; }).join('');
-                if (v && typeof v === 'object' && v.result !== undefined) v = v.result;
-                record[headers[c - 1]] = v;
+        var rawRecs = [];
+        for (var r = 2; r <= sheet.rowCount; r++) {
+            var row = sheet.getRow(r);
+            var rec = {};
+            for (var c2 = 1; c2 <= headers.length; c2++) {
+                var val = row.getCell(c2).value;
+                if (val && typeof val === 'object' && val.richText) val = val.richText.map(function(x) { return x.text; }).join('');
+                if (val && typeof val === 'object' && val.result !== undefined) val = val.result;
+                rec[headers[c2 - 1]] = val;
             }
-
-            const auraId = record.session_auraId;
-            if (!auraId) continue;
-
-            if (!sessionMap[auraId]) {
-                sessionMap[auraId] = {
-                    session: {
-                        auraId: auraId,
-                        createdOn: record.session_createdOn,
-                        modifiedOn: record.session_modifiedOn,
-                        state: record.session_state,
-                        driver: record.session_driver,
-                        vehicleFrontPlate: record.session_vehicleFrontPlate,
-                        vehicleBackPlate: record.session_vehicleBackPlate,
-                    },
-                    events: [],
-                };
-            }
-
-            sessionMap[auraId].events.push({
-                occurenceSource: record.event_occurence_source,
-                dtOccurence: record.event_dt_occurence,
-                source: record.event_source,
-                type: record.event_type,
-                topic: record.event_topic,
-                value: record.event_value,
-                message: record.event_message,
-            });
+            rawRecs.push(rec);
         }
 
-        // Process each session into KPI
-        const records = [];
-        for (const auraId of Object.keys(sessionMap)) {
-            const kpi = kpiProcessor.processSession(sessionMap[auraId].session, sessionMap[auraId].events);
-            if (kpi) records.push(kpi);
-        }
-
-        if (records.length > 0) {
-            kpiStore = records;
-            storeStatus.loaded = true;
-            storeStatus.error = null;
-            storeStatus.recordCount = records.length;
-            storeStatus.loadCount = records.filter(function (r) { return r.workOrderType === 'load'; }).length;
-            storeStatus.unloadCount = records.filter(function (r) { return r.workOrderType === 'unload'; }).length;
-            storeStatus.lastLoadTime = new Date().toISOString();
-            console.log('[DataLoader] Excel load successful:', storeStatus.recordCount, 'records');
+        if (rawRecs.length > 0) {
+            kpiStore = rawRecs.map(normalizeRow);
+            finishLoad(kpiStore);
             return true;
         }
-
-        storeStatus.error = 'Excel contained 0 processable sessions.';
+        storeStatus.error = 'Excel KPI sheet empty.';
         return false;
-
-    } catch (err) {
-        const msg = 'Excel load failed: ' + err.message;
-        console.error('[DataLoader]', msg);
-        storeStatus.error = msg;
+    } catch (e) {
+        console.error('[DataLoader] Excel failed:', e.message);
+        storeStatus.error = 'Excel load failed: ' + e.message;
         return false;
     }
 }
 
-/**
- * Try loading from the database (SQL Server).
- */
+// ── Database Loader ─────────────────────────────────────────────────
+
 async function tryLoadFromDatabase() {
     console.log('[DataLoader] Attempting database fallback...');
     storeStatus.source = 'database';
-
     try {
-        const { query } = require('../db/connection');
-        const result = await query('SELECT * FROM KPIs ORDER BY SessionCreationTime DESC');
-
+        var db = require('../db/connection');
+        var result = await db.query('SELECT * FROM KPIs ORDER BY SessionCreationTime DESC');
         if (result.recordset && result.recordset.length > 0) {
             kpiStore = result.recordset.map(function (row) {
                 return {
-                    sessionAuraId: row.SessionAuraId,
                     driver: row.Driver,
                     licensePlate: row.LicensePlate,
+                    status: row.Status,
                     workOrderType: row.WorkOrderType,
                     sessionCreationTime: row.SessionCreationTime instanceof Date ? row.SessionCreationTime.toISOString() : row.SessionCreationTime,
                     sessionClosingTime: row.SessionClosingTime instanceof Date ? row.SessionClosingTime.toISOString() : row.SessionClosingTime,
@@ -284,116 +168,124 @@ async function tryLoadFromDatabase() {
                     barrierExitTime: row.BarrierExitTime instanceof Date ? row.BarrierExitTime.toISOString() : row.BarrierExitTime,
                 };
             });
-
-            storeStatus.loaded = true;
-            storeStatus.error = null;
-            storeStatus.recordCount = kpiStore.length;
-            storeStatus.loadCount = kpiStore.filter(function (r) { return r.workOrderType === 'load'; }).length;
-            storeStatus.unloadCount = kpiStore.filter(function (r) { return r.workOrderType === 'unload'; }).length;
-            storeStatus.lastLoadTime = new Date().toISOString();
-            console.log('[DataLoader] Database load successful:', storeStatus.recordCount, 'records');
+            finishLoad(kpiStore);
             return true;
         }
-
-        storeStatus.error = 'Database KPIs table is empty.';
+        storeStatus.error = 'Database KPIs table empty.';
         return false;
-
-    } catch (err) {
-        const msg = 'Database connection failed: ' + err.message;
-        console.error('[DataLoader]', msg);
-        storeStatus.error = msg;
+    } catch (e) {
+        console.error('[DataLoader] Database failed:', e.message);
+        storeStatus.error = 'Database failed: ' + e.message;
         return false;
     }
 }
 
-/**
- * Get KPI data with filtering, sorting, pagination, search.
- * Works on the in-memory store — no DB needed.
- */
-function getKpiData(params) {
-    let data = [...kpiStore];
+// ── Row Normalizer ──────────────────────────────────────────────────
+// Maps KPI sheet column names to frontend column names.
 
-    // Filter by type
-    if (params.type === 'load' || params.type === 'unload') {
-        data = data.filter(function (r) { return r.workOrderType === params.type; });
+function normalizeRow(row) {
+    var type = row['Work Order Type'] || '';
+    var firstTime, firstKg, secondTime, secondKg, net;
+
+    if (type === 'load') {
+        firstTime = row['1st Weighing Time (L)'];
+        firstKg = row['1st Weighing [kg] (L)'];
+        secondTime = row['2nd Weighing Time (L)'];
+        secondKg = row['2nd Weighing [kg] (L)'];
+        net = row['Loaded Qty [kg]'];
+    } else {
+        firstTime = row['1st Weighing Time (U)'];
+        firstKg = row['1st Weighing [kg] (U)'];
+        secondTime = row['2nd Weighing Time (U)'];
+        secondKg = row['2nd Weighing [kg] (U)'];
+        net = row['Unloaded Qty [kg]'];
     }
-
-    // Filter by date range
-    if (params.startDate) {
-        const start = new Date(params.startDate);
-        data = data.filter(function (r) {
-            return r.sessionCreationTime && new Date(r.sessionCreationTime) >= start;
-        });
-    }
-    if (params.endDate) {
-        const end = new Date(params.endDate);
-        data = data.filter(function (r) {
-            return r.sessionCreationTime && new Date(r.sessionCreationTime) < end;
-        });
-    }
-
-    // Search
-    if (params.search) {
-        const term = params.search.toLowerCase();
-        data = data.filter(function (r) {
-            return (r.driver && r.driver.toLowerCase().includes(term)) ||
-                   (r.licensePlate && r.licensePlate.toLowerCase().includes(term)) ||
-                   (r.netQuantityKg !== null && String(Math.round(r.netQuantityKg)).includes(term));
-        });
-    }
-
-    const totalRecords = data.length;
-
-    // Sort
-    const sortCol = params.sortColumn || 'sessionCreationTime';
-    const sortDir = params.sortDirection === 'asc' ? 1 : -1;
-
-    data.sort(function (a, b) {
-        const va = a[sortCol] || '';
-        const vb = b[sortCol] || '';
-        if (va < vb) return -1 * sortDir;
-        if (va > vb) return 1 * sortDir;
-        return 0;
-    });
-
-    // Paginate
-    const page = Math.max(1, params.page || 1);
-    const pageSize = Math.min(500, Math.max(1, params.pageSize || 50));
-    const offset = (page - 1) * pageSize;
-    const paged = data.slice(offset, offset + pageSize);
-
-    // Project to requested columns
-    const columns = params.columns ? params.columns.split(',').map(function (c) { return c.trim(); }) : null;
-
-    const projected = paged.map(function (row) {
-        if (!columns || columns.length === 0) return row;
-        const obj = {};
-        columns.forEach(function (col) {
-            if (row.hasOwnProperty(col)) {
-                obj[col] = row[col];
-            }
-        });
-        return obj;
-    });
 
     return {
-        data: projected,
-        totalRecords: totalRecords,
-        page: page,
-        pageSize: pageSize,
-        totalPages: Math.ceil(totalRecords / pageSize) || 1,
+        driver: row['Driver'],
+        licensePlate: row['License Plate'],
+        status: row['Status'],
+        workOrderType: type,
+        sessionCreationTime: toIso(row['Session Creation Time']),
+        sessionClosingTime: toIso(row['Session Closing Time']),
+        derivate: row['Derivate'] || row['Materials & Quantities'],
+        smsNotificationTime: toIso(row['SMS Notification Time']),
+        firstWeighingTime: toIso(firstTime),
+        firstWeighingKg: firstKg,
+        secondWeighingTime: toIso(secondTime),
+        secondWeighingKg: secondKg,
+        netQuantityKg: net,
+        barrierEntranceTime: toIso(row['Barrier Entrance (U)']),
+        barrierExitTime: toIso(row['Barrier Exit (U)']),
     };
 }
 
-/**
- * Get current status
- */
-function getStatus() {
-    return { ...storeStatus };
+function toIso(val) {
+    if (!val) return null;
+    if (val instanceof Date) return val.toISOString();
+    try { var d = new Date(val); return isNaN(d.getTime()) ? val : d.toISOString(); } catch (e) { return val; }
 }
 
-module.exports = {
-    initialize,
-    getKpiData,
-    getStatus,
-};
+// ── Status ─────────────────────────────────────────────────────────
+
+function finishLoad(store) {
+    storeStatus.loaded = true;
+    storeStatus.error = null;
+    storeStatus.recordCount = store.length;
+    storeStatus.loadCount = store.filter(function (r) { return r.workOrderType === 'load'; }).length;
+    storeStatus.unloadCount = store.filter(function (r) { return r.workOrderType === 'unload'; }).length;
+    storeStatus.lastLoadTime = new Date().toISOString();
+    console.log('[DataLoader] Loaded:', storeStatus.recordCount, 'records (' + storeStatus.loadCount + ' load, ' + storeStatus.unloadCount + ' unload)');
+}
+
+// ── Query Engine ────────────────────────────────────────────────────
+
+function getKpiData(params) {
+    var data = kpiStore.slice();
+
+    if (params.type === 'load' || params.type === 'unload') {
+        data = data.filter(function (r) { return r.workOrderType === params.type; });
+    }
+    if (params.startDate) {
+        var s = new Date(params.startDate);
+        data = data.filter(function (r) { return r.sessionCreationTime && new Date(r.sessionCreationTime) >= s; });
+    }
+    if (params.endDate) {
+        var e = new Date(params.endDate);
+        data = data.filter(function (r) { return r.sessionCreationTime && new Date(r.sessionCreationTime) < e; });
+    }
+    if (params.search) {
+        var term = params.search.toLowerCase();
+        data = data.filter(function (r) {
+            return String(r.driver || '').toLowerCase().includes(term)
+                || String(r.licensePlate || '').toLowerCase().includes(term)
+                || (r.netQuantityKg !== null && r.netQuantityKg !== undefined && String(Math.round(r.netQuantityKg)).includes(term));
+        });
+    }
+
+    var total = data.length;
+    var sortCol = params.sortColumn || 'sessionCreationTime';
+    var dir = params.sortDirection === 'asc' ? 1 : -1;
+    data.sort(function (a, b) {
+        var va = a[sortCol] || '', vb = b[sortCol] || '';
+        return va < vb ? -1 * dir : va > vb ? 1 * dir : 0;
+    });
+
+    var page = Math.max(1, params.page || 1);
+    var ps = Math.min(500, Math.max(1, params.pageSize || 50));
+    var paged = data.slice((page - 1) * ps, page * ps);
+
+    var cols = params.columns ? params.columns.split(',').map(function (c) { return c.trim(); }) : null;
+    var projected = paged.map(function (row) {
+        if (!cols || cols.length === 0) return row;
+        var o = {};
+        cols.forEach(function (c) { o[c] = row[c]; });
+        return o;
+    });
+
+    return { data: projected, totalRecords: total, page: page, pageSize: ps, totalPages: Math.ceil(total / ps) || 1 };
+}
+
+function getStatus() { return Object.assign({}, storeStatus); }
+
+module.exports = { initialize: initialize, getKpiData: getKpiData, getStatus: getStatus };
