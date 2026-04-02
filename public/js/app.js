@@ -85,6 +85,7 @@
     window.saveColumnVisibility = saveColumnVisibility;
     window.closeColumnPopup     = closeColumnPopup;
     window.exportData           = exportData;
+    window.clearFilters         = clearFilters;
 
     // ── Search ─────────────────────────────────────────────────────────
     function onSearch() {
@@ -141,6 +142,32 @@
         endDate   = e;
         try { localStorage.setItem('oktadata_startDate', s); localStorage.setItem('oktadata_endDate', e); } catch (ex) { }
         currentPage = 1;
+        fetchData();
+    }
+
+    function clearFilters() {
+        // Reset search
+        searchTerm = '';
+        var searchInput = document.getElementById('searchInput');
+        if (searchInput) searchInput.value = '';
+
+        // Reset dates to default range
+        var today = new Date();
+        var start = new Date();
+        start.setDate(start.getDate() - defaultDays);
+        startDate = formatDateISO(start);
+        endDate   = formatDateISO(today);
+        document.getElementById('startDate').value = startDate;
+        document.getElementById('endDate').value   = endDate;
+
+        // Clear stored dates
+        try { localStorage.removeItem('oktadata_startDate'); localStorage.removeItem('oktadata_endDate'); } catch (ex) { }
+
+        // Reset sort
+        sortColumn    = 'sessionCreationTime';
+        sortDirection = 'desc';
+        currentPage   = 1;
+
         fetchData();
     }
 
