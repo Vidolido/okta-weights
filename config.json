@@ -1,6 +1,6 @@
 {
   "api": {
-    "baseUrl": "http://10.25.16.20/",
+    "baseUrl": "https://10.25.16.20/",
     "apiKey": "11",
     "clientId": "admin",
     "clientSecretHash": "7db132bc98c2bcc6727ca45f7d305d83ace778a3cb2b3be9c34db9babc50830e378f5bf92041d3e0a3e700ccb611531dceb1002c844d6aac760e56c4859c6666",
