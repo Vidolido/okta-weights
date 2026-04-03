@@ -84,7 +84,7 @@ async function authenticate() {
             transformRequest: [function (data, headers) {
                 console.log('[AUTH] Axios internal - Content-Type being sent:', headers['Content-Type']);
                 console.log('[AUTH] Axios internal - Data type:', typeof data);
-                return data;
+                return JSON.stringify(data);
             }],
         });
 
