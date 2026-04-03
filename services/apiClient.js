@@ -130,11 +130,8 @@ async function authenticate() {
 
         cachedToken = String(token);
         console.log('');
-        console.log('[AUTH] ✓ TOKEN RECEIVED');
-        console.log('[AUTH] Token type:', typeof cachedToken);
-        console.log('[AUTH] Token length:', cachedToken.length);
-        console.log('[AUTH] Token first 40 chars:', cachedToken.substring(0, 40));
-        console.log('[AUTH] Token last 10 chars:', cachedToken.substring(cachedToken.length - 10));
+        console.log('[AUTH] ✓ TOKEN RECEIVED (FULL):');
+        console.log('[AUTH] Token:', cachedToken);
         console.log('');
 
         return cachedToken;

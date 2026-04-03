@@ -134,7 +134,7 @@ app.get('/api/test-connection', async function (req, res) {
                 status: 'ok',
                 timeMs: Date.now() - authStart,
                 tokenLength: token ? token.length : 0,
-                tokenPreview: token ? token.substring(0, 40) + '...' : null
+                tokenFull: token || null
             });
         } catch (authErr) {
             results.steps.push({
