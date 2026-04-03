@@ -24,40 +24,106 @@ let storeStatus = {
 };
 
 async function initialize() {
+    console.log('');
+    console.log('╔══════════════════════════════════════════════════╗');
+    console.log('║          DATA LOADER INITIALIZATION              ║');
+    console.log('╚══════════════════════════════════════════════════╝');
     console.log('[DataLoader] Starting data initialization...');
-    if (await tryLoadFromApi()) return;
-    if (await tryLoadFromExcel()) return;
-    if (await tryLoadFromDatabase()) return;
+    console.log('[DataLoader] Step 1: Try API');
+    console.log('[DataLoader] Step 2: Try Excel JSON (if API fails)');
+    console.log('[DataLoader] Step 3: Try Database (if Excel fails)');
+    console.log('');
+
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('  STEP 1: API');
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    if (await tryLoadFromApi()) {
+        console.log('[DataLoader] ✓ API load successful, skipping fallbacks');
+        return;
+    }
+    console.log('[DataLoader] ✗ API load failed, trying next source...');
+    console.log('');
+
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('  STEP 2: EXCEL JSON');
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    if (await tryLoadFromExcel()) {
+        console.log('[DataLoader] ✓ Excel load successful, skipping database');
+        return;
+    }
+    console.log('[DataLoader] ✗ Excel load failed, trying next source...');
+    console.log('');
+
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('  STEP 3: DATABASE');
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    if (await tryLoadFromDatabase()) {
+        console.log('[DataLoader] ✓ Database load successful');
+        return;
+    }
+
     storeStatus.error = 'All data sources failed.';
-    console.error('[DataLoader] All data sources failed.');
+    console.error('[DataLoader] ✗✗✗ ALL DATA SOURCES FAILED ✗✗✗');
 }
 
 // ── API Loader ─────────────────────────────────────────────────────
 
 async function tryLoadFromApi() {
-    console.log('[DataLoader] Attempting API connection...');
+    console.log('[DataLoader/API] Starting API connection attempt...');
     storeStatus.source = 'api';
     try {
         var apiClient = require('./apiClient');
         var kpiProcessor = require('./kpiProcessor');
-        await apiClient.authenticate();
 
+        console.log('[DataLoader/API] Step A: Authenticating...');
+        var token = await apiClient.authenticate();
+        console.log('[DataLoader/API] Step A: Got token, type:', typeof token, ', length:', String(token).length);
+
+        console.log('[DataLoader/API] Step B: Fetching sessions...');
         var modFrom = new Date();
         modFrom.setDate(modFrom.getDate() - 30);
-        var sessions = await apiClient.getSessions(modFrom.toISOString().split('T')[0] + 'T00:00:00');
-        console.log('[DataLoader] API returned', sessions.length, 'sessions');
+        var modFromStr = modFrom.toISOString().split('T')[0] + 'T00:00:00';
+        console.log('[DataLoader/API] Step B: modFrom calculated as:', modFromStr);
 
+        var sessions = await apiClient.getSessions(modFromStr);
+        console.log('[DataLoader/API] Step B: Got', sessions.length, 'sessions from API');
+
+        if (sessions.length === 0) {
+            console.log('[DataLoader/API] No sessions returned, aborting API load');
+            storeStatus.error = 'API returned 0 sessions.';
+            return false;
+        }
+
+        console.log('[DataLoader/API] Step C: Processing', sessions.length, 'sessions into KPI records...');
         var records = [];
         for (var i = 0; i < sessions.length; i++) {
+            var sess = sessions[i];
+            console.log('[DataLoader/API] Step C: Session', (i+1), '/', sessions.length, 'auraId:', sess.auraId, 'plate:', sess.licensePlate);
             try {
-                var events = await apiClient.getSessionEvents(sessions[i].auraId);
-                var kpi = kpiProcessor.processSession(sessions[i], events);
-                if (kpi) records.push(kpi);
+                var events = await apiClient.getSessionEvents(sess.auraId);
+                console.log('[DataLoader/API]   → Got', events.length, 'events for session', sess.auraId);
+
+                if (events.length > 0) {
+                    console.log('[DataLoader/API]   → First event keys:', Object.keys(events[0]));
+                    console.log('[DataLoader/API]   → First event preview:', JSON.stringify(events[0]).substring(0, 200));
+                }
+
+                var kpi = kpiProcessor.processSession(sess, events);
+                if (kpi) {
+                    records.push(kpi);
+                    console.log('[DataLoader/API]   → KPI record created, type:', kpi.workOrderType, 'driver:', kpi.driver);
+                } else {
+                    console.log('[DataLoader/API]   → No KPI record produced (processSession returned null)');
+                }
+
+                // Delay between requests to avoid hammering the API
                 await new Promise(function (r) { setTimeout(r, 300); });
             } catch (e) {
-                console.warn('[DataLoader] Session', sessions[i].auraId, 'failed:', e.message);
+                console.warn('[DataLoader/API]   ✗ Session', sess.auraId, 'failed:', e.message);
             }
         }
+
+        console.log('[DataLoader/API] Step D: Processing complete.', records.length, 'KPI records from', sessions.length, 'sessions');
 
         if (records.length > 0) {
             kpiStore = records;
@@ -65,9 +131,18 @@ async function tryLoadFromApi() {
             return true;
         }
         storeStatus.error = 'API returned 0 processable sessions.';
+        console.log('[DataLoader/API] 0 KPI records produced from', sessions.length, 'sessions');
         return false;
     } catch (e) {
-        console.error('[DataLoader] API failed:', e.message);
+        console.error('[DataLoader/API] ✗ API failed at some step');
+        console.error('[DataLoader/API] Error name:', e.name);
+        console.error('[DataLoader/API] Error message:', e.message);
+        console.error('[DataLoader/API] Error code:', e.code || 'N/A');
+        if (e.config) {
+            console.error('[DataLoader/API] Request URL that failed:', e.config.url);
+            console.error('[DataLoader/API] Request method:', e.config.method);
+        }
+        if (e.stack) console.error('[DataLoader/API] Stack:', e.stack.split('\n').slice(0, 5).join('\n'));
         storeStatus.error = 'API connection failed: ' + e.message;
         return false;
     }
