@@ -4,6 +4,10 @@
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
+const https = require('https');
+
+// Allow self-signed / internal company SSL certificates
+const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 
 let apiConfig = null;
 
@@ -78,9 +82,8 @@ async function authenticate() {
             headers: requestHeaders,
             data: requestBody,
             timeout: cfg.requestTimeout || 30000,
-            // Prevent axios from throwing on non-2xx so we can log everything
+            httpsAgent: httpsAgent,
             validateStatus: function () { return true; },
-            // Log the actual request axios makes
             transformRequest: [function (data, headers) {
                 console.log('[AUTH] Axios internal - Content-Type being sent:', headers['Content-Type']);
                 console.log('[AUTH] Axios internal - Data type:', typeof data);
@@ -208,6 +211,7 @@ async function getSessions(modFrom) {
         const response = await axios.get(url, {
             headers: requestHeaders,
             timeout: cfg.requestTimeout || 30000,
+            httpsAgent: httpsAgent,
             validateStatus: function () { return true; },
         });
 
@@ -273,6 +277,7 @@ async function getSessionEvents(sessionId) {
                 'Authorization': 'Bearer ' + token,
             },
             timeout: cfg.requestTimeout || 30000,
+            httpsAgent: httpsAgent,
             validateStatus: function () { return true; },
         });
 

@@ -11,6 +11,9 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 
+// Allow self-signed / internal company SSL certificates globally
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
 // ── Load config ─────────────────────────────────────────────────────
 const configPath = path.resolve(__dirname, 'config.json');
 const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
