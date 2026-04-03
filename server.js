@@ -67,6 +67,119 @@ app.get('/', function (req, res) {
 
 // ── API routes ──────────────────────────────────────────────────────
 
+// API connectivity test — hit this in browser to diagnose API issues
+app.get('/api/test-connection', async function (req, res) {
+    var results = {
+        timestamp: new Date().toISOString(),
+        steps: [],
+    };
+
+    try {
+        var apiClient = require('./services/apiClient');
+        var cfg = require('./config.json').api;
+
+        // Step 1: Show config
+        results.steps.push({ step: 'config', baseUrl: cfg.baseUrl, apiKey: cfg.apiKey, clientId: cfg.clientId });
+
+        // Step 2: Test DNS resolution
+        try {
+            var dns = require('dns');
+            var url = new URL(cfg.baseUrl);
+            var hostname = url.hostname;
+            var dnsResult = await new Promise(function(resolve, reject) {
+                dns.lookup(hostname, function(err, address, family) {
+                    if (err) reject(err);
+                    else resolve({ hostname: hostname, address: address, family: family });
+                });
+            });
+            results.steps.push({ step: 'dns', status: 'ok', data: dnsResult });
+        } catch (dnsErr) {
+            results.steps.push({ step: 'dns', status: 'failed', error: dnsErr.message, hostname: hostname });
+        }
+
+        // Step 3: Test raw TCP connection
+        try {
+            var net = require('net');
+            var url = new URL(cfg.baseUrl);
+            var host = url.hostname;
+            var port = parseInt(url.port) || (url.protocol === 'https:' ? 443 : 80);
+            var tcpResult = await new Promise(function(resolve, reject) {
+                var socket = new net.Socket();
+                socket.setTimeout(5000);
+                socket.on('connect', function() {
+                    socket.destroy();
+                    resolve({ host: host, port: port, connected: true });
+                });
+                socket.on('timeout', function() {
+                    socket.destroy();
+                    reject(new Error('TCP connection timeout after 5s'));
+                });
+                socket.on('error', function(err) {
+                    socket.destroy();
+                    reject(err);
+                });
+                socket.connect(port, host);
+            });
+            results.steps.push({ step: 'tcp', status: 'ok', data: tcpResult });
+        } catch (tcpErr) {
+            results.steps.push({ step: 'tcp', status: 'failed', error: tcpErr.message, host: host, port: port });
+        }
+
+        // Step 4: Auth
+        var authStart = Date.now();
+        try {
+            var token = await apiClient.authenticate();
+            results.steps.push({
+                step: 'auth',
+                status: 'ok',
+                timeMs: Date.now() - authStart,
+                tokenLength: token ? token.length : 0,
+                tokenPreview: token ? token.substring(0, 40) + '...' : null
+            });
+        } catch (authErr) {
+            results.steps.push({
+                step: 'auth',
+                status: 'failed',
+                timeMs: Date.now() - authStart,
+                error: authErr.message,
+                code: authErr.code || null
+            });
+        }
+
+        // Step 5: Fetch one session
+        if (results.steps[results.steps.length - 1].status === 'ok') {
+            var sessStart = Date.now();
+            try {
+                var modFrom = new Date();
+                modFrom.setDate(modFrom.getDate() - 7);
+                var modFromStr = modFrom.toISOString().split('T')[0] + 'T00:00:00';
+                var sessions = await apiClient.getSessions(modFromStr);
+                results.steps.push({
+                    step: 'sessions',
+                    status: 'ok',
+                    timeMs: Date.now() - sessStart,
+                    count: sessions.length,
+                    firstSession: sessions.length > 0 ? JSON.stringify(sessions[0]).substring(0, 300) : null
+                });
+            } catch (sessErr) {
+                results.steps.push({
+                    step: 'sessions',
+                    status: 'failed',
+                    timeMs: Date.now() - sessStart,
+                    error: sessErr.message,
+                    code: sessErr.code || null
+                });
+            }
+        }
+
+    } catch (e) {
+        results.error = e.message;
+    }
+
+    res.setHeader('Content-Type', 'application/json');
+    res.send(JSON.stringify(results, null, 2));
+});
+
 // KPI data — serves from in-memory store (loaded from API/Excel/DB)
 app.get('/api/data/kpi', function (req, res) {
     try {
